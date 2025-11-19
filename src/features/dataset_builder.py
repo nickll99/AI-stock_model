@@ -65,27 +65,67 @@ class FeatureDatasetBuilder:
         # 检查NaN情况
         rows_before = len(df_features)
         nan_counts = df_features.isna().sum()
+        
+        # 先删除完全是NaN的列
+        all_nan_cols = nan_counts[nan_counts == rows_before].index.tolist()
+        if len(all_nan_cols) > 0:
+            print(f"\n删除完全是NaN的列 ({len(all_nan_cols)}个):")
+            for col in all_nan_cols:
+                print(f"  - {col}")
+            df_features = df_features.drop(columns=all_nan_cols)
+            # 重新计算NaN统计
+            nan_counts = df_features.isna().sum()
+        
+        # 显示包含NaN的列
         cols_with_nan = nan_counts[nan_counts > 0]
-        
         if len(cols_with_nan) > 0:
-            print(f"\n包含NaN的列:")
-            for col, count in cols_with_nan.items():
+            print(f"\n包含NaN的列 ({len(cols_with_nan)}个):")
+            # 只显示前10个
+            for col, count in list(cols_with_nan.items())[:10]:
                 print(f"  {col}: {count} 个NaN ({count/rows_before*100:.1f}%)")
+            if len(cols_with_nan) > 10:
+                print(f"  ... 还有 {len(cols_with_nan) - 10} 个列包含NaN")
         
-        # 删除NaN行（由于计算指标产生的）
-        df_features = df_features.dropna()
-        rows_after = len(df_features)
+        # 尝试删除NaN行
+        df_features_dropna = df_features.dropna()
+        rows_after_dropna = len(df_features_dropna)
         
-        print(f"\n删除NaN后: {rows_after} 条记录 (删除了 {rows_before - rows_after} 条)")
+        print(f"\n如果删除所有NaN行: 剩余 {rows_after_dropna} 条记录 (删除了 {rows_before - rows_after_dropna} 条)")
+        
+        # 如果删除NaN后数据太少或为空，使用填充策略
+        if rows_after_dropna < 100:
+            print(f"\n⚠️  删除NaN后数据太少，使用填充策略...")
+            
+            # 策略1：前向填充（适用于技术指标）
+            df_features = df_features.fillna(method='ffill')
+            
+            # 策略2：对于仍然是NaN的（开头的数据），使用后向填充
+            df_features = df_features.fillna(method='bfill')
+            
+            # 策略3：如果还有NaN（极端情况），使用0填充
+            df_features = df_features.fillna(0)
+            
+            rows_after = len(df_features)
+            print(f"✓ 使用填充策略后: {rows_after} 条记录")
+            
+            # 检查是否还有NaN
+            remaining_nan = df_features.isna().sum().sum()
+            if remaining_nan > 0:
+                print(f"⚠️  警告: 仍有 {remaining_nan} 个NaN值")
+        else:
+            df_features = df_features_dropna
+            rows_after = rows_after_dropna
+            print(f"✓ 删除NaN后: {rows_after} 条记录")
         
         if len(df_features) == 0:
             raise ValueError(
                 f"特征构建后数据为空！原始数据有 {len(df)} 条记录，"
-                f"但在计算技术指标和删除NaN后变为0条。\n"
-                f"这通常是因为数据量不足以计算所需的技术指标（如MA60需要至少60条数据）。\n"
+                f"但在计算技术指标后变为0条。\n"
+                f"这通常是因为数据质量问题或数据量不足。\n"
                 f"建议：\n"
-                f"  1. 增加数据量（至少需要200条以上的历史数据）\n"
-                f"  2. 或者减少技术指标的计算周期"
+                f"  1. 检查数据库中的数据质量\n"
+                f"  2. 增加数据量（至少需要200条以上的历史数据）\n"
+                f"  3. 或者减少技术指标的计算周期"
             )
         
         if len(df_features) < 100:
