@@ -154,53 +154,76 @@ def load_all_stocks_data(
                             print(f"[{i}/{len(symbols)}] 已加载 {success_count} 只 (缓存命中: {cache_hit}, 未命中: {cache_miss})")
                         
                         continue
-                except Exception:
-                    pass  # 缓存加载失败，继续尝试其他方式
+                    else:
+                        # 缓存数据不足，跳过该股票（不回退到数据库）
+                        if df_features is None:
+                            cache_miss += 1
+                            if i % 100 == 0:
+                                print(f"[{i}/{len(symbols)}] {symbol}: 缓存不存在，跳过")
+                        else:
+                            cache_miss += 1
+                            if i % 100 == 0:
+                                print(f"[{i}/{len(symbols)}] {symbol}: 缓存数据不足 ({len(df_features)}条)，跳过")
+                        fail_count += 1
+                        continue
+                except Exception as e:
+                    # 缓存加载失败，跳过该股票（不回退到数据库）
+                    cache_miss += 1
+                    if i % 100 == 0:
+                        print(f"[{i}/{len(symbols)}] {symbol}: 缓存加载失败 - {e}，跳过")
+                    fail_count += 1
+                    continue
             
-            # 从K线缓存或数据库加载
-            cache_miss += 1
-            df = kline_loader.load_kline_data(
-                symbol,
-                config['train_start_date'],
-                config['train_end_date']
-            )
-            
-            if len(df) < 200:
-                print(f"[{i}/{len(symbols)}] {symbol}: 数据不足 ({len(df)}条)")
+            # 只有在不使用缓存时才从数据库加载
+            if not use_cache:
+                cache_miss += 1
+                df = kline_loader.load_kline_data(
+                    symbol,
+                    config['train_start_date'],
+                    config['train_end_date']
+                )
+                
+                if len(df) < 200:
+                    print(f"[{i}/{len(symbols)}] {symbol}: 数据不足 ({len(df)}条)")
+                    fail_count += 1
+                    continue
+                
+                # 构建数据集
+                dataset = builder.build_complete_dataset(
+                    df,
+                    seq_length=config['seq_length'],
+                    target_col='close',
+                    train_ratio=0.7,
+                    val_ratio=0.15,
+                    test_ratio=0.15,
+                    normalize=True,
+                    use_cache=False
+                )
+                
+                stock_id = stock_to_id[symbol]
+                
+                # 添加到列表
+                X_train_list.append(dataset['X_train'])
+                y_train_list.append(dataset['y_train'])
+                train_ids.extend([stock_id] * len(dataset['y_train']))
+                
+                X_val_list.append(dataset['X_val'])
+                y_val_list.append(dataset['y_val'])
+                val_ids.extend([stock_id] * len(dataset['y_val']))
+                
+                X_test_list.append(dataset['X_test'])
+                y_test_list.append(dataset['y_test'])
+                test_ids.extend([stock_id] * len(dataset['y_test']))
+                
+                success_count += 1
+                
+                if i % 100 == 0:
+                    print(f"[{i}/{len(symbols)}] 已加载 {success_count} 只股票")
+            else:
+                # 使用缓存模式下，不应该到达这里
+                # 如果到达这里，说明缓存加载失败，跳过该股票
                 fail_count += 1
                 continue
-            
-            # 构建数据集
-            dataset = builder.build_complete_dataset(
-                df,
-                seq_length=config['seq_length'],
-                target_col='close',
-                train_ratio=0.7,
-                val_ratio=0.15,
-                test_ratio=0.15,
-                normalize=True,
-                use_cache=False
-            )
-            
-            stock_id = stock_to_id[symbol]
-            
-            # 添加到列表
-            X_train_list.append(dataset['X_train'])
-            y_train_list.append(dataset['y_train'])
-            train_ids.extend([stock_id] * len(dataset['y_train']))
-            
-            X_val_list.append(dataset['X_val'])
-            y_val_list.append(dataset['y_val'])
-            val_ids.extend([stock_id] * len(dataset['y_val']))
-            
-            X_test_list.append(dataset['X_test'])
-            y_test_list.append(dataset['y_test'])
-            test_ids.extend([stock_id] * len(dataset['y_test']))
-            
-            success_count += 1
-            
-            if i % 100 == 0:
-                print(f"[{i}/{len(symbols)}] 已加载 {success_count} 只股票")
             
         except Exception as e:
             print(f"[{i}/{len(symbols)}] {symbol}: 失败 - {e}")

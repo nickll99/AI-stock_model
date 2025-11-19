@@ -2,7 +2,14 @@
 
 ## ✅ 问题已修复！
 
-**通用模型训练脚本现在默认使用缓存数据，速度快10-100倍！**
+**通用模型训练脚本现在强制只使用缓存数据，完全不访问MySQL数据库！**
+
+### 关键改进
+
+1. ✅ **强制使用缓存** - 不会回退到MySQL数据库
+2. ✅ **跳过不足数据** - 缓存数据不足时直接跳过该股票
+3. ✅ **完全无SQL** - 使用缓存时不会有任何SQL查询
+4. ✅ **速度快10-100倍** - 数据加载只需2-5分钟
 
 ---
 
@@ -65,6 +72,7 @@ python scripts/train_universal_model.py \
 - `数据源: 缓存数据` ✅
 - `使用缓存数据加载` ✅
 - `缓存命中: XX 只` ✅
+- **没有任何 `sqlalchemy` 或 `SELECT` 相关的日志** ✅
 
 ---
 
@@ -94,7 +102,20 @@ python scripts/train_universal_model.py \
 python scripts/prepare_training_data.py --symbols all --workers 8 --resume
 ```
 
-### Q3: 如果我想从数据库加载怎么办？
+### Q3: 为什么有些股票被跳过了？
+
+**答：** 缓存数据不足200条会被跳过。解决方法：
+
+```bash
+# 使用更早的开始日期重新预热
+python scripts/prepare_training_data.py \
+    --symbols all \
+    --workers 8 \
+    --resume \
+    --start-date 2019-01-01  # 或更早
+```
+
+### Q4: 如果我想从数据库加载怎么办？
 
 ```bash
 # 添加 --no-cache 参数（不推荐，非常慢）
