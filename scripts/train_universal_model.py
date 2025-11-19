@@ -278,7 +278,6 @@ def main():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--limit", type=int, default=None, help="限制股票数量（测试用）")
     parser.add_argument("--output-dir", type=str, default="out/universal_model")
-    parser.add_argument("--use-cache", action="store_true", default=True, help="使用缓存数据（默认启用）")
     parser.add_argument("--no-cache", action="store_true", help="不使用缓存，从数据库加载")
     parser.add_argument("--kline-cache-dir", type=str, default="data/parquet", help="K线缓存目录")
     parser.add_argument("--feature-cache-dir", type=str, default="data/features", help="特征缓存目录")
@@ -286,8 +285,8 @@ def main():
     
     args = parser.parse_args()
     
-    # 处理缓存参数
-    use_cache = not args.no_cache if args.no_cache else args.use_cache
+    # 处理缓存参数（默认使用缓存，除非指定 --no-cache）
+    use_cache = not args.no_cache
     
     print("\n" + "=" * 70)
     print("  训练通用股票预测模型")
@@ -316,6 +315,10 @@ def main():
     print(f"  训练轮数: {config['epochs']}")
     print(f"  批次大小: {config['batch_size']}")
     print(f"  设备: {args.device}")
+    print(f"  数据源: {'缓存数据' if use_cache else 'MySQL数据库'}")
+    if use_cache:
+        print(f"    K线缓存: {args.kline_cache_dir}")
+        print(f"    特征缓存: {args.feature_cache_dir}")
     
     # 获取股票列表
     print("\n获取股票列表...")
