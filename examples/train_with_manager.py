@@ -91,27 +91,39 @@ def main():
     manager.save_training_log("开始特征工程")
     
     builder = FeatureDatasetBuilder()
-    df_features = builder.build_feature_matrix(df)
     
-    X, y, feature_names = builder.prepare_sequences(
-        df_features,
+    # 方法1：使用build_complete_dataset一步到位（推荐）
+    # 这个方法会自动完成特征构建、数据划分、序列准备等所有步骤
+    dataset = builder.build_complete_dataset(
+        df,
         seq_length=config['seq_length'],
         target_col='close',
-        normalize=True
+        train_ratio=0.7,
+        val_ratio=0.15,
+        test_ratio=0.15,
+        normalize=True,
+        use_cache=False  # 不使用缓存，确保使用最新数据
     )
     
-    print(f"✓ 特征矩阵: {X.shape}")
+    # 提取训练数据
+    X = dataset['X_train']
+    y = dataset['y_train']
+    feature_names = dataset['feature_names']
+    
+    print(f"✓ 训练集: {X.shape}")
+    print(f"✓ 验证集: {dataset['X_val'].shape}")
+    print(f"✓ 测试集: {dataset['X_test'].shape}")
     print(f"✓ 特征数量: {len(feature_names)}")
     
     manager.save_training_log(f"特征工程完成: {X.shape}")
     
-    # 划分数据集
-    X_train, X_val, X_test, y_train, y_val, y_test = builder.split_dataset(
-        X, y,
-        train_ratio=0.7,
-        val_ratio=0.15,
-        test_ratio=0.15
-    )
+    # 数据集已经在build_complete_dataset中划分好了
+    X_train = dataset['X_train']
+    y_train = dataset['y_train']
+    X_val = dataset['X_val']
+    y_val = dataset['y_val']
+    X_test = dataset['X_test']
+    y_test = dataset['y_test']
     
     print(f"✓ 训练集: {X_train.shape[0]} 样本")
     print(f"✓ 验证集: {X_val.shape[0]} 样本")

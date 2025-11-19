@@ -12,7 +12,7 @@
     python scripts/prepare_training_data.py --symbols all --resume
     
     # 多并发 + 断点续传
-    python scripts/prepare_training_data.py --symbols all --workers 4 --resume
+    python scripts/prepare_training_data.py --symbols all --workers 124 --resume
 """
 import sys
 from pathlib import Path

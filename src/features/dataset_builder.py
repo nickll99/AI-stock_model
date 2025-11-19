@@ -45,20 +45,51 @@ class FeatureDatasetBuilder:
         """
         df_features = df.copy()
         
+        print(f"原始数据: {len(df_features)} 条记录")
+        
         # 添加技术指标
         if include_technical:
             df_features = self.feature_engineer.create_technical_indicators(df_features)
+            print(f"添加技术指标后: {len(df_features)} 条记录")
         
         # 添加价格特征
         if include_price:
             df_features = self.feature_engineer.create_price_features(df_features)
+            print(f"添加价格特征后: {len(df_features)} 条记录")
         
         # 添加成交量特征
         if include_volume:
             df_features = self.feature_engineer.create_volume_features(df_features)
+            print(f"添加成交量特征后: {len(df_features)} 条记录")
+        
+        # 检查NaN情况
+        rows_before = len(df_features)
+        nan_counts = df_features.isna().sum()
+        cols_with_nan = nan_counts[nan_counts > 0]
+        
+        if len(cols_with_nan) > 0:
+            print(f"\n包含NaN的列:")
+            for col, count in cols_with_nan.items():
+                print(f"  {col}: {count} 个NaN ({count/rows_before*100:.1f}%)")
         
         # 删除NaN行（由于计算指标产生的）
         df_features = df_features.dropna()
+        rows_after = len(df_features)
+        
+        print(f"\n删除NaN后: {rows_after} 条记录 (删除了 {rows_before - rows_after} 条)")
+        
+        if len(df_features) == 0:
+            raise ValueError(
+                f"特征构建后数据为空！原始数据有 {len(df)} 条记录，"
+                f"但在计算技术指标和删除NaN后变为0条。\n"
+                f"这通常是因为数据量不足以计算所需的技术指标（如MA60需要至少60条数据）。\n"
+                f"建议：\n"
+                f"  1. 增加数据量（至少需要200条以上的历史数据）\n"
+                f"  2. 或者减少技术指标的计算周期"
+            )
+        
+        if len(df_features) < 100:
+            print(f"\n⚠️  警告: 特征数据量较少({len(df_features)}条)，可能影响模型训练效果")
         
         return df_features
     
@@ -116,15 +147,27 @@ class FeatureDatasetBuilder:
         """
         df_prep = df.copy()
         
-        # 标准化
-        if normalize:
-            df_prep = self.preprocessor.normalize_features(df_prep, method='standard', fit=True)
+        # 检查数据是否为空
+        if len(df_prep) == 0:
+            raise ValueError(f"输入数据为空，无法准备序列")
         
-        # 确定特征列
+        # 确定特征列（在标准化之前）
         if feature_cols is None:
             # 排除非特征列
             exclude_cols = ['symbol', target_col]
             feature_cols = [col for col in df_prep.columns if col not in exclude_cols]
+        
+        # 检查是否有足够的数据
+        if len(df_prep) < seq_length:
+            raise ValueError(f"数据量不足：需要至少 {seq_length} 条记录，但只有 {len(df_prep)} 条")
+        
+        # 标准化
+        if normalize:
+            df_prep = self.preprocessor.normalize_features(df_prep, method='standard', fit=True)
+        
+        # 再次检查标准化后的数据
+        if len(df_prep) == 0:
+            raise ValueError(f"标准化后数据为空，请检查数据质量")
         
         # 创建序列
         X, y = self.preprocessor.create_sequences(
