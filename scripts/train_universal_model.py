@@ -243,7 +243,7 @@ def load_all_stocks_data(
             X_test_list, y_test_list, train_ids, val_ids, test_ids)
 
 
-def train_epoch(model, train_loader, criterion, optimizer, device):
+def train_epoch(model, train_loader, criterion, optimizer, device, scaler=None, use_amp=False):
     """训练一个epoch"""
     model.train()
     total_loss = 0
@@ -253,14 +253,23 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         y_batch = y_batch.to(device)
         stock_ids_batch = stock_ids_batch.squeeze().to(device)
         
-        # 前向传播
-        outputs = model(X_batch, stock_ids_batch)
-        loss = criterion(outputs, y_batch)
-        
-        # 反向传播
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        
+        # 使用混合精度训练
+        if use_amp and scaler is not None:
+            with torch.cuda.amp.autocast():
+                outputs = model(X_batch, stock_ids_batch)
+                loss = criterion(outputs, y_batch)
+            
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            # 标准训练
+            outputs = model(X_batch, stock_ids_batch)
+            loss = criterion(outputs, y_batch)
+            loss.backward()
+            optimizer.step()
         
         total_loss += loss.item()
     
@@ -305,6 +314,10 @@ def main():
     parser.add_argument("--kline-cache-dir", type=str, default="data/parquet", help="K线缓存目录")
     parser.add_argument("--feature-cache-dir", type=str, default="data/features", help="特征缓存目录")
     parser.add_argument("--stock-type", type=str, default=None, help="股票类型筛选（如'主板'、'创业板'、'科创板'等），默认不筛选")
+    parser.add_argument("--amp", action="store_true", help="使用混合精度训练（AMP）加速，推荐在GPU上使用")
+    parser.add_argument("--num-workers", type=int, default=4, help="DataLoader的工作进程数")
+    parser.add_argument("--pin-memory", action="store_true", default=True, help="使用pin_memory加速数据传输")
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1, help="梯度累积步数，可以模拟更大的batch size")
     
     args = parser.parse_args()
     
@@ -338,6 +351,8 @@ def main():
     print(f"  训练轮数: {config['epochs']}")
     print(f"  批次大小: {config['batch_size']}")
     print(f"  设备: {args.device}")
+    print(f"  混合精度: {'启用' if args.amp and args.device == 'cuda' else '禁用'}")
+    print(f"  DataLoader workers: {args.num_workers}")
     print(f"  数据源: {'缓存数据' if use_cache else 'MySQL数据库'}")
     if use_cache:
         print(f"    K线缓存: {args.kline_cache_dir}")
@@ -375,9 +390,29 @@ def main():
     val_dataset = UniversalStockDataset(X_val_list, y_val_list, val_ids)
     test_dataset = UniversalStockDataset(X_test_list, y_test_list, test_ids)
     
-    train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=config['batch_size'])
-    test_loader = DataLoader(test_dataset, batch_size=config['batch_size'])
+    # 优化DataLoader性能
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=config['batch_size'], 
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory and args.device == 'cuda',
+        persistent_workers=args.num_workers > 0
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=config['batch_size'],
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory and args.device == 'cuda',
+        persistent_workers=args.num_workers > 0
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=config['batch_size'],
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory and args.device == 'cuda',
+        persistent_workers=args.num_workers > 0
+    )
     
     print(f"✓ 训练集: {len(train_dataset):,} 样本")
     print(f"✓ 验证集: {len(val_dataset):,} 样本")
@@ -423,8 +458,19 @@ def main():
         optimizer, mode='min', factor=0.5, patience=5
     )
     
+    # 混合精度训练
+    use_amp = args.amp and args.device == 'cuda'
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    
+    if use_amp:
+        print(f"✓ 启用混合精度训练（AMP）")
+    
     # 训练
     print(f"\n开始训练...")
+    if use_amp:
+        print(f"  混合精度: 启用")
+    print(f"  DataLoader workers: {args.num_workers}")
+    print(f"  Pin memory: {args.pin_memory and args.device == 'cuda'}")
     print(f"{'='*70}\n")
     
     best_val_loss = float('inf')
@@ -446,7 +492,7 @@ def main():
         epoch_start = time.time()
         
         # 训练
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, args.device)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, args.device, scaler, use_amp)
         
         # 验证
         val_loss = evaluate(model, val_loader, criterion, args.device)
