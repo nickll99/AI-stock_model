@@ -301,6 +301,29 @@ class FeatureCache:
         except Exception as e:
             logger.warning(f"保存特征缓存失败 {symbol}: {e}")
     
+    def load_features(self, symbol: str) -> Optional[pd.DataFrame]:
+        """
+        从缓存加载特征
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            特征DataFrame，如果不存在返回None
+        """
+        cache_file = self.cache_dir / f"{symbol}_features.parquet"
+        
+        if cache_file.exists():
+            try:
+                df = pd.read_parquet(cache_file)
+                logger.info(f"从缓存加载特征 {symbol}: {len(df)} 条记录")
+                return df
+            except Exception as e:
+                logger.warning(f"读取特征缓存失败 {symbol}: {e}")
+                return None
+        
+        return None
+    
     def clear_cache(self, symbol: Optional[str] = None):
         """清除特征缓存"""
         if symbol:

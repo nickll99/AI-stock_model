@@ -58,7 +58,7 @@ checkpoints/
 out/
 
 # Data
-# data/
+data
 *.csv
 *.xlsx
 *.xls
