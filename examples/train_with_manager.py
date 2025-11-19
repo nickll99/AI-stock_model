@@ -220,10 +220,8 @@ def main():
     print(f"\n评估模型...")
     manager.save_training_log("开始评估")
     
-    test_loader = trainer.create_data_loader(X_test, y_test, batch_size=config['batch_size'])
-    
     evaluator = ModelEvaluator(model, trainer.device)
-    metrics = evaluator.evaluate(test_loader)
+    metrics = evaluator.evaluate(X_test, y_test, batch_size=config['batch_size'])
     
     print(f"\n✓ 评估指标:")
     print(f"  MAE: {metrics['mae']:.6f}")
