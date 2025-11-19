@@ -70,9 +70,16 @@ class ModelTrainer:
         
         # 学习率调度器
         if scheduler_type == 'reduce_on_plateau':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode='min', factor=0.5, patience=5, verbose=True
-            )
+            # 注意：PyTorch 2.0+ 中 verbose 参数已被移除
+            try:
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode='min', factor=0.5, patience=5, verbose=True
+                )
+            except TypeError:
+                # 如果 verbose 参数不支持，则不使用它
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode='min', factor=0.5, patience=5
+                )
         elif scheduler_type == 'step':
             scheduler = torch.optim.lr_scheduler.StepLR(
                 optimizer, step_size=20, gamma=0.5
