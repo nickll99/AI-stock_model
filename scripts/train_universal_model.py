@@ -62,30 +62,104 @@ class UniversalStockDataset(Dataset):
 def load_all_stocks_data(
     symbols: List[str],
     config: Dict,
-    stock_to_id: Dict[str, int]
+    stock_to_id: Dict[str, int],
+    use_cache: bool = True,
+    kline_cache_dir: str = "data/parquet",
+    feature_cache_dir: str = "data/features"
 ) -> Tuple:
     """
-    加载所有股票的数据
+    加载所有股票的数据（优先使用缓存）
+    
+    Args:
+        symbols: 股票代码列表
+        config: 配置字典
+        stock_to_id: 股票ID映射
+        use_cache: 是否使用缓存
+        kline_cache_dir: K线缓存目录
+        feature_cache_dir: 特征缓存目录
     
     Returns:
         (X_train_list, y_train_list, X_val_list, y_val_list, X_test_list, y_test_list, train_ids, val_ids, test_ids)
     """
-    loader = StockDataLoader()
+    from src.data.cached_loader import ParquetDataLoader, FeatureCache
+    
+    # 使用缓存加载器
+    if use_cache:
+        kline_loader = ParquetDataLoader(cache_dir=kline_cache_dir)
+        feature_cache = FeatureCache(cache_dir=feature_cache_dir)
+        print(f"\n使用缓存数据加载 {len(symbols)} 只股票...")
+        print(f"  K线缓存: {kline_cache_dir}")
+        print(f"  特征缓存: {feature_cache_dir}")
+    else:
+        kline_loader = StockDataLoader()
+        feature_cache = None
+        print(f"\n从数据库加载 {len(symbols)} 只股票...")
+    
     builder = FeatureDatasetBuilder()
     
     X_train_list, y_train_list, train_ids = [], [], []
     X_val_list, y_val_list, val_ids = [], [], []
     X_test_list, y_test_list, test_ids = [], [], []
     
-    print(f"\n加载 {len(symbols)} 只股票的数据...")
-    
     success_count = 0
     fail_count = 0
+    cache_hit = 0
+    cache_miss = 0
     
     for i, symbol in enumerate(symbols, 1):
         try:
-            # 加载数据
-            df = loader.load_kline_data(
+            # 尝试从特征缓存加载（最快）
+            if use_cache and feature_cache:
+                try:
+                    df_features = feature_cache.load_features(symbol)
+                    if df_features is not None and len(df_features) >= 200:
+                        cache_hit += 1
+                        
+                        # 直接使用缓存的特征数据
+                        train_df, val_df, test_df = builder.split_dataset(
+                            df_features,
+                            train_ratio=0.7,
+                            val_ratio=0.15,
+                            test_ratio=0.15
+                        )
+                        
+                        # 准备序列
+                        X_train, y_train, feature_names = builder.prepare_sequences(
+                            train_df, config['seq_length'], 'close', normalize=True
+                        )
+                        X_val, y_val, _ = builder.prepare_sequences(
+                            val_df, config['seq_length'], 'close', feature_names, normalize=False
+                        )
+                        X_test, y_test, _ = builder.prepare_sequences(
+                            test_df, config['seq_length'], 'close', feature_names, normalize=False
+                        )
+                        
+                        stock_id = stock_to_id[symbol]
+                        
+                        X_train_list.append(X_train)
+                        y_train_list.append(y_train)
+                        train_ids.extend([stock_id] * len(y_train))
+                        
+                        X_val_list.append(X_val)
+                        y_val_list.append(y_val)
+                        val_ids.extend([stock_id] * len(y_val))
+                        
+                        X_test_list.append(X_test)
+                        y_test_list.append(y_test)
+                        test_ids.extend([stock_id] * len(y_test))
+                        
+                        success_count += 1
+                        
+                        if i % 100 == 0:
+                            print(f"[{i}/{len(symbols)}] 已加载 {success_count} 只 (缓存命中: {cache_hit}, 未命中: {cache_miss})")
+                        
+                        continue
+                except Exception:
+                    pass  # 缓存加载失败，继续尝试其他方式
+            
+            # 从K线缓存或数据库加载
+            cache_miss += 1
+            df = kline_loader.load_kline_data(
                 symbol,
                 config['train_start_date'],
                 config['train_end_date']
@@ -135,6 +209,9 @@ def load_all_stocks_data(
     print(f"\n数据加载完成:")
     print(f"  成功: {success_count} 只")
     print(f"  失败: {fail_count} 只")
+    if use_cache:
+        print(f"  缓存命中: {cache_hit} 只 ({cache_hit/(cache_hit+cache_miss)*100:.1f}%)")
+        print(f"  缓存未命中: {cache_miss} 只")
     print(f"  训练样本: {sum(len(y) for y in y_train_list):,}")
     print(f"  验证样本: {sum(len(y) for y in y_val_list):,}")
     print(f"  测试样本: {sum(len(y) for y in y_test_list):,}")
@@ -201,8 +278,16 @@ def main():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--limit", type=int, default=None, help="限制股票数量（测试用）")
     parser.add_argument("--output-dir", type=str, default="out/universal_model")
+    parser.add_argument("--use-cache", action="store_true", default=True, help="使用缓存数据（默认启用）")
+    parser.add_argument("--no-cache", action="store_true", help="不使用缓存，从数据库加载")
+    parser.add_argument("--kline-cache-dir", type=str, default="data/parquet", help="K线缓存目录")
+    parser.add_argument("--feature-cache-dir", type=str, default="data/features", help="特征缓存目录")
+    parser.add_argument("--stock-type", type=str, default=None, help="股票类型筛选（如'主板'、'创业板'、'科创板'等），默认不筛选")
     
     args = parser.parse_args()
+    
+    # 处理缓存参数
+    use_cache = not args.no_cache if args.no_cache else args.use_cache
     
     print("\n" + "=" * 70)
     print("  训练通用股票预测模型")
@@ -235,7 +320,10 @@ def main():
     # 获取股票列表
     print("\n获取股票列表...")
     loader = StockDataLoader()
-    symbols = loader.get_all_active_stocks()
+    symbols = loader.get_all_active_stocks(stock_type=args.stock_type)
+    
+    if args.stock_type:
+        print(f"股票类型: {args.stock_type}")
     
     if args.limit:
         symbols = symbols[:args.limit]
@@ -249,7 +337,10 @@ def main():
     # 加载数据
     (X_train_list, y_train_list, X_val_list, y_val_list,
      X_test_list, y_test_list, train_ids, val_ids, test_ids) = load_all_stocks_data(
-        symbols, config, stock_to_id
+        symbols, config, stock_to_id,
+        use_cache=use_cache,
+        kline_cache_dir=args.kline_cache_dir,
+        feature_cache_dir=args.feature_cache_dir
     )
     
     # 创建数据集

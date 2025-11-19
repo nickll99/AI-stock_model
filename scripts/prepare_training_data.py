@@ -347,6 +347,13 @@ def main():
     )
     
     parser.add_argument(
+        "--stock-type",
+        type=str,
+        default=None,
+        help="股票类型筛选（如'主板'、'创业板'、'科创板'等），默认不筛选"
+    )
+    
+    parser.add_argument(
         "--start-date",
         type=str,
         default=(datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d"),
@@ -430,8 +437,11 @@ def main():
     if args.symbols == "all":
         print("\n获取所有活跃股票...")
         loader = StockDataLoader()
-        symbols = loader.get_all_active_stocks()
-        print(f"找到 {len(symbols)} 只活跃股票")
+        symbols = loader.get_all_active_stocks(stock_type=args.stock_type)
+        if args.stock_type:
+            print(f"找到 {len(symbols)} 只活跃股票（类型: {args.stock_type}）")
+        else:
+            print(f"找到 {len(symbols)} 只活跃股票")
     else:
         symbols = [s.strip() for s in args.symbols.split(",")]
         print(f"\n指定股票: {', '.join(symbols)}")

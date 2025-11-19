@@ -60,12 +60,15 @@ def train_single_stock(args: Tuple) -> Tuple[str, bool, dict, str]:
             output_dir=config['output_dir']
         )
         
-        # 2. 加载数据
-        loader = StockDataLoader()
-        df = loader.load_kline_data(
+        # 2. 加载数据（优先使用缓存）
+        from src.data.cached_loader import ParquetDataLoader
+        
+        cache_loader = ParquetDataLoader(cache_dir="data/parquet")
+        df = cache_loader.load_kline_data(
             symbol,
             config['train_start_date'],
-            config['train_end_date']
+            config['train_end_date'],
+            use_cache=True  # 使用缓存数据
         )
         
         if len(df) < 200:
@@ -246,6 +249,13 @@ def main():
         help="限制训练的股票数量（用于测试）"
     )
     
+    parser.add_argument(
+        "--stock-type",
+        type=str,
+        default=None,
+        help="股票类型筛选（如'主板'、'创业板'、'科创板'等），默认不筛选"
+    )
+    
     args = parser.parse_args()
     
     print("\n" + "=" * 70)
@@ -280,8 +290,11 @@ def main():
     if args.symbols == "all":
         print("\n获取所有活跃股票...")
         loader = StockDataLoader()
-        symbols = loader.get_all_active_stocks()
-        print(f"找到 {len(symbols)} 只活跃股票")
+        symbols = loader.get_all_active_stocks(stock_type=args.stock_type)
+        if args.stock_type:
+            print(f"找到 {len(symbols)} 只活跃股票（类型: {args.stock_type}）")
+        else:
+            print(f"找到 {len(symbols)} 只活跃股票")
     else:
         symbols = [s.strip() for s in args.symbols.split(",")]
         print(f"\n指定股票: {', '.join(symbols)}")

@@ -140,24 +140,33 @@ class StockDataLoader:
             'employee_count': stock.employee_count
         }
     
-    def get_all_active_stocks(self) -> List[str]:
+    def get_all_active_stocks(self, stock_type: Optional[str] = None) -> List[str]:
         """
         获取所有活跃股票代码列表（is_active=1）
+        
+        Args:
+            stock_type: 股票类型筛选（如'主板'、'创业板'、'科创板'等），None表示不筛选
         
         Returns:
             股票代码列表
         """
         if self._use_context:
             with get_db_context() as db:
-                return self._get_all_active_stocks_impl(db)
+                return self._get_all_active_stocks_impl(db, stock_type)
         else:
-            return self._get_all_active_stocks_impl(self.db)
+            return self._get_all_active_stocks_impl(self.db, stock_type)
     
-    def _get_all_active_stocks_impl(self, db: Session) -> List[str]:
+    def _get_all_active_stocks_impl(self, db: Session, stock_type: Optional[str] = None) -> List[str]:
         """活跃股票列表加载实现"""
-        stocks = db.query(StockBasicInfo.symbol).filter(
+        query = db.query(StockBasicInfo.symbol).filter(
             StockBasicInfo.is_active == 1
-        ).all()
+        )
+        
+        # 如果指定了股票类型，添加筛选条件
+        if stock_type:
+            query = query.filter(StockBasicInfo.stock_type == stock_type)
+        
+        stocks = query.all()
         
         return [stock.symbol for stock in stocks]
     
