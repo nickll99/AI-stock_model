@@ -34,7 +34,6 @@ def check_gpu():
         print(f"     计算能力: {props.major}.{props.minor}")
         print(f"     总显存: {props.total_memory / 1024**3:.2f} GB")
         print(f"     多处理器数量: {props.multi_processor_count}")
-        print(f"     最大线程数/块: {props.max_threads_per_block}")
     
     # 3. 当前显存使用
     print("\n3. 显存使用:")
